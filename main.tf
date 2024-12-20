@@ -1,9 +1,8 @@
 provider "aws" {
-  region = "us-east-1" 
+  region = var.region
 }
 
-#VPC
-
+# VPC
 resource "aws_vpc" "VPC" {
   cidr_block = var.vpc_cidr
 
@@ -12,26 +11,24 @@ resource "aws_vpc" "VPC" {
   }
 }
 
-# Define CIDR blocks for public and private subnets
+# Fetch available availability zones in the specified region
+data "aws_availability_zones" "available" {}
+
+# Define CIDR blocks for public and private subnets dynamically
 locals {
-  public_cidrs = {
-    "az1" = "10.0.0.0/24"
-    "az2" = "10.0.1.0/24"
-    "az3" = "10.0.2.0/24"
-  }
+  public_cidrs = { for i, az in data.aws_availability_zones.available.names : 
+                    az => cidrsubnet(var.vpc_cidr, 8, i) }
   
-  private_cidrs = {
-    "az1" = "10.0.3.0/24"
-    "az2" = "10.0.4.0/24"
-    "az3" = "10.0.5.0/24"
-  }
+  private_cidrs = { for i, az in data.aws_availability_zones.available.names : 
+                     az => cidrsubnet(var.vpc_cidr, 8, i + length(data.aws_availability_zones.available.names)) }
 }
 
+# Public Subnets
 resource "aws_subnet" "public_subnet" {
-  for_each = var.vpc_azs
+  for_each = toset(data.aws_availability_zones.available.names)  # Convert list to set
 
   vpc_id            = aws_vpc.VPC.id
-  cidr_block        = local.public_cidrs[each.key]  # Use local variable for CIDR
+  cidr_block        = local.public_cidrs[each.value]  # Use local variable for CIDR
   availability_zone = each.value
   map_public_ip_on_launch = true  # Enable public IP for public subnets
 
@@ -40,11 +37,12 @@ resource "aws_subnet" "public_subnet" {
   }
 }
 
+# Private Subnets
 resource "aws_subnet" "private_subnet" {
-  for_each = var.vpc_azs
+  for_each = toset(data.aws_availability_zones.available.names)  # Convert list to set
 
   vpc_id            = aws_vpc.VPC.id
-  cidr_block        = local.private_cidrs[each.key]  # Use local variable for CIDR
+  cidr_block        = local.private_cidrs[each.value]  # Use local variable for CIDR
   availability_zone = each.value
   map_public_ip_on_launch = false  # Disable public IP for private subnets
 
@@ -52,8 +50,6 @@ resource "aws_subnet" "private_subnet" {
     Name = "${var.vpc_name}-Private-Subnet-${each.value}"
   }
 }
-
-
 
 # Public Route Table
 resource "aws_route_table" "public" {
@@ -89,7 +85,6 @@ resource "aws_route_table_association" "private_subnet_assoc" {
   route_table_id = aws_route_table.private.id
 }
 
-
 # Internet Gateway (for Public Route Table)
 resource "aws_internet_gateway" "gw" {
   vpc_id = aws_vpc.VPC.id
@@ -98,8 +93,6 @@ resource "aws_internet_gateway" "gw" {
     Name = "${var.vpc_name}-IG"
   }
 }
-
-
 
 # Route for Public Route Table (to Internet Gateway)
 resource "aws_route" "public_route" {
@@ -119,16 +112,15 @@ resource "aws_eip" "nat_eip" {
 # NAT Gateway
 resource "aws_nat_gateway" "nat_gateway" {
   allocation_id = aws_eip.nat_eip.id
-  subnet_id     = aws_subnet.public_subnet["az1"].id  # Use one of the public subnets
+  subnet_id     = aws_subnet.public_subnet[data.aws_availability_zones.available.names[0]].id  # Use the first public subnet ID
 
   tags = {
     Name = "${var.vpc_name}-NAT-Gateway"
   }
 }
-
 # Route for Private Route Table (to NAT Gateway)
 resource "aws_route" "private_route_to_nat" {
   route_table_id         = aws_route_table.private.id
-  destination_cidr_block = "0.0.0.0/0"
+ destination_cidr_block = "0.0.0.0/0"
   nat_gateway_id         = aws_nat_gateway.nat_gateway.id
 }
