@@ -12,8 +12,8 @@ variable "vpc_cidr" {
 variable "vpc_azs" {
   type = map(string)
   default = {
-    "az1" = "ap-southeast-2a"
-    "az2" = "ap-southeast-2b"
-    "az3" = "ap-southeast-2c"
+    "az1" = "us-east-1a"
+    "az2" = "us-east-1b"
+    "az3" = "us-east-1c"
   }
 }
